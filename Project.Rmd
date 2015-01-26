@@ -1,0 +1,187 @@
+---
+title: "Practical Machine Learning Project"
+author: "rhdatascience"
+date: "Sunday, January 25, 2014"
+output: html_document
+---
+
+```{r, echo=FALSE, warning=FALSE}
+#Loading packages and setting the seed
+library(httr)
+library(caret)
+library(randomForest)
+library(doSNOW)
+set.seed(1234)
+
+#----------------------------------------------------------
+#  Creating folders and downloading the data
+#
+#
+dataFolderPath <- ".\\data"
+rawDataFolderPath <- ".\\data\\raw"
+
+if(!file.exists(dataFolderPath)) { dir.create(dataFolderPath) }
+if(!file.exists(rawDataFolderPath)) { dir.create(rawDataFolderPath) }
+
+baseUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+trainingFileName <- "pml-training.csv"
+testingFileName <- "pml-testing.csv"
+
+trainingUrl <- paste(baseUrl,trainingFileName, sep="")
+testingUrl <- paste(baseUrl,testingFileName, sep="")
+
+trainingDataPath <- paste(rawDataFolderPath, trainingFileName, sep="\\")
+testingDataPath <- paste(rawDataFolderPath, testingFileName, sep="\\")
+
+#Download data
+if(!file.exists(trainingDataPath)) { 
+        download.file(trainingUrl, destfile = trainingDataPath)
+}
+if(!file.exists(testingDataPath)) { 
+        download.file(testingUrl, destfile = testingDataPath)
+}
+#----------------------------------------------------------
+
+#----------------------------------------------------------
+#  Loading data from disk if already present
+#
+#
+trainingRDataPath <- ".\\data\\raw\\training.RData"
+testingRDataPath <- ".\\data\\raw\\testing.RData"
+
+if(file.exists(trainingRDataPath)) { 
+        load(trainingRDataPath)
+} else {
+        trainingData <- read.csv(trainingDataPath)
+        save(trainingData, file=trainingRDataPath)
+}
+if(file.exists(testingRDataPath)) { 
+        load(testingRDataPath)
+} else {
+        testingData <- read.csv(testingDataPath)
+        save(testingData, file=testingRDataPath)
+}
+#----------------------------------------------------------
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+#Remove feature columns that contains only NAs
+trainingData <- Filter(function(x)!all(is.na(x)), trainingData)
+
+#Remove X variable in training and testing dataset
+trainingData$X <- NULL
+testingData$X <- NULL
+
+#Assign classe to yTrain and remove it from the trainingData dataset
+yTrain <- trainingData$classe
+trainingData$classe <- NULL
+
+
+#cast data into numeric
+trainingData$min_yaw_belt <- as.numeric(trainingData$min_yaw_belt)
+trainingData$max_yaw_belt <- as.numeric(trainingData$max_yaw_belt)
+trainingData$max_yaw_arm <- as.numeric(trainingData$max_yaw_arm)
+trainingData$max_yaw_forearm <- as.numeric(trainingData$max_yaw_forearm)
+trainingData$min_yaw_dumbbell <- as.numeric(trainingData$min_yaw_dumbbell)
+trainingData$max_yaw_dumbbell <- as.numeric(trainingData$max_yaw_dumbbell)
+trainingData$min_pitch_belt <- as.numeric(trainingData$min_pitch_belt)
+trainingData$max_picth_belt <- as.numeric(trainingData$max_picth_belt)
+trainingData$min_yaw_arm <- as.numeric(trainingData$min_yaw_arm)
+trainingData$min_yaw_forearm <- as.numeric(trainingData$min_yaw_forearm)
+
+testingData$min_yaw_belt <- as.numeric(testingData$min_yaw_belt)
+testingData$max_yaw_belt <- as.numeric(testingData$max_yaw_belt)
+testingData$max_yaw_arm <- as.numeric(testingData$max_yaw_arm)
+testingData$max_yaw_forearm <- as.numeric(testingData$max_yaw_forearm)
+testingData$min_yaw_dumbbell <- as.numeric(testingData$min_yaw_dumbbell)
+testingData$max_yaw_dumbbell <- as.numeric(testingData$max_yaw_dumbbell)
+testingData$min_pitch_belt <- as.numeric(testingData$min_pitch_belt)
+testingData$max_picth_belt <- as.numeric(testingData$max_picth_belt)
+testingData$min_yaw_arm <- as.numeric(testingData$min_yaw_arm)
+testingData$min_yaw_forearm <- as.numeric(testingData$min_yaw_forearm)
+```
+
+##Cleaning data
+The training set contains many feature measurements. I am deciding to keep only features which have a name starting with "avg", "var", "min", "max" and "stddev".
+```{r, echo=FALSE}
+#Cleaning data
+avgFeatInd <- grep("^avg_", names(trainingData))
+varFeatInd <- grep("^var_", names(trainingData))
+minFeatInd <- grep("^min_", names(trainingData))
+maxFeatInd <- grep("^max_", names(trainingData))
+sdFeatInd <- grep("^stddev_", names(trainingData))
+
+featInd <- c(avgFeatInd,varFeatInd,minFeatInd,maxFeatInd, sdFeatInd)
+#names(trainingData[featInd])
+
+newTrainingData <- trainingData[,featInd]
+```
+
+I am deviding the training data into 70% for training and 30% for testing.
+```{r, echo=TRUE}
+inTrain <- createDataPartition(data.frame(newTrainingData,yTrain)$yTrain, p=0.70, list=FALSE)
+
+training <- newTrainingData[inTrain,]
+yTraining <- yTrain[inTrain]
+testing <- newTrainingData[-inTrain,]
+yTesting <- yTrain[-inTrain]
+```
+
+##Model training
+I will train 3 models. They are all using the random forest algorithm but each of them is using a diffent pre-processing methods.
+
+###Model 1 - Random forest model, pre-processing using knnImpute, number of tree is 100
+```{r, echo=FALSE}
+cl<-makeCluster(4) # Assign number of cores you want to use; in this case use 4 cores
+registerDoSNOW(cl) # Register the cores.
+
+ctrl <- trainControl(method = "repeatedcv")
+
+#Random forest model, pre-processing using knnImpute, number of tree is 100
+modelFit1 <- train(classe~., data=data.frame(training,classe=yTraining), preProcess="knnImpute", method="rf", trControl = ctrl, ntree=100)
+
+
+#predictions <- predict(modelFit1, testing)
+#confusionMatrix(predictions, yTesting)
+```
+
+The error rate is 25% and its accuracy is 79%
+```{r, echo=TRUE}
+modelFit1$results
+modelFit1$finalModel
+```
+
+###Model 2 - Random forest model, pre-processing using center and scale method
+```{r, echo=FALSE}
+modelFit2 <- train(classe ~., data=data.frame(training,classe=yTraining), preProcess=c("center", "scale"), method="rf", trControl = ctrl)
+```
+
+The error rate is 18.31% and its accuracy is 80.3%
+```{r, echo=TRUE}
+modelFit2$results
+modelFit2$finalModel
+```
+
+###Model 3 - Random forest model, pre-processing pca method
+```{r, echo=FALSE}
+modelFit3 <- train(classe ~., data=data.frame(training,classe=yTraining), preProcess="pca", method="rf", trControl = ctrl)
+```
+
+```{r, echo=TRUE}
+#Error rate is 38.73%, Accuracy is 61.2%
+modelFit3$results
+modelFit3$finalModel
+```
+
+```{r, echo=FALSE}
+stopCluster(cl) # Explicitly free up your cores again.
+```
+
+##Out of error sample
+I tried to compute the out of sample error on my testing set but somehow the dimension of the predictions that I got on the testing did not match with my yTesting vector.
+
+My best model had an accurary of 80% and thus the out of sample accurary must be lower that that.
+
+#Conclusion
+Out of the 3 models that I tried, the best one was model number 2 that used the center and scaling pre-processing method. The accuracy on the training set of this model was 80%. This is not very good. My out of sample accuracy will be lower than that.
